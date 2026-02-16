@@ -6,12 +6,12 @@ const userSchema = new mongoose.Schema({
     required: true,
     min: 3,
     max: 20,
-    unique: true, // שם המשתמש חייב להיות ייחודי
+    unique: true,
   },
   email: {
     type: String,
     required: true,
-    unique: true, // האימייל חייב להיות ייחודי
+    unique: true,
     max: 50,
   },
   password: {
@@ -21,12 +21,22 @@ const userSchema = new mongoose.Schema({
   },
   isAvatarImageSet: {
     type: Boolean,
-    default: false, // האם המשתמש כבר בחר תמונת פרופיל?
+    default: false,
   },
   avatarImage: {
     type: String,
-    default: "", // המחרוזת של התמונה (בדרך כלל Base64 או URL)
+    default: "",
   },
+  // --- NEW FEATURES ---
+  about: {
+    type: String,
+    default: "Hey there! I am using Snappy.", // Default WhatsApp-style bio
+    max: 50,
+  },
+  isOnline: {
+    type: Boolean,
+    default: false, // Helps track if user is currently connected
+  }
 });
 
 module.exports = mongoose.model("Users", userSchema);

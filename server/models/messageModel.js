@@ -3,17 +3,21 @@ const mongoose = require("mongoose");
 const MessageSchema = mongoose.Schema(
   {
     message: {
-      text: { type: String, required: true }, // תוכן ההודעה
+      text: { type: String, required: true },
     },
-    users: Array, // מערך שמכיל את ה-ID של השולח ושל המקבל [senderId, receiverId]
+    users: Array,
     sender: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
     },
+    read: {
+      type: Boolean,
+      default: false, // New field to track read status
+    },
   },
   {
-    timestamps: true, // יוסיף אוטומטית שדות createdAt ו-updatedAt
+    timestamps: true,
   }
 );
 
