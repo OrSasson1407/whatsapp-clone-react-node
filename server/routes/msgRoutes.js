@@ -1,13 +1,9 @@
-const { addMessage, getMessages, deleteMessage } = require("../controllers/msgController");
+const { addMessage, getMessages, deleteMessage, addReaction } = require("../controllers/msgController");
 const router = require("express").Router();
 
-// Route to add a message (Supports text and audio)
-router.post("/addmsg/", addMessage);
-
-// Route to get all messages (Supports private and group)
-router.post("/getmsg/", getMessages);
-
-// NEW: Route to delete a message (Fixes the 404 error)
-router.post("/delete/", deleteMessage);
+router.post("/addmsg", addMessage);
+router.post("/getmsg", getMessages);
+router.post("/delete", deleteMessage);
+router.post("/reaction", addReaction); // New Route
 
 module.exports = router;

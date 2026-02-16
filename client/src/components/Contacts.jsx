@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from "react";
 import styled from "styled-components";
-import { BiSearchAlt2 } from "react-icons/bi"; // Make sure to install: npm install react-icons
+import { BiSearchAlt2 } from "react-icons/bi";
 
-// Using the WhatsApp logo you provided
+// Using the WhatsApp logo for branding
 const Logo = "https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg";
 
 export default function Contacts({ contacts, changeChat }) {
@@ -10,7 +10,7 @@ export default function Contacts({ contacts, changeChat }) {
   const [currentUserImage, setCurrentUserImage] = useState(undefined);
   const [currentSelected, setCurrentSelected] = useState(undefined);
   
-  // New State for Search
+  // State for Search functionality
   const [searchQuery, setSearchQuery] = useState("");
   const [filteredContacts, setFilteredContacts] = useState([]);
 
@@ -48,7 +48,6 @@ export default function Contacts({ contacts, changeChat }) {
             <h3>snappy</h3>
           </div>
           
-          {/* --- NEW: Search Bar --- */}
           <div className="search-bar">
             <div className="input-container">
                <BiSearchAlt2 />
@@ -62,7 +61,6 @@ export default function Contacts({ contacts, changeChat }) {
           </div>
 
           <div className="contacts">
-            {/* We map over filteredContacts instead of contacts */}
             {filteredContacts.map((contact, index) => {
               return (
                 <div
@@ -77,7 +75,6 @@ export default function Contacts({ contacts, changeChat }) {
                     <div className="username">
                       <h3>{contact.username}</h3>
                     </div>
-                    {/* Placeholder for Bio/Last Message - Improves UI Density */}
                     <div className="bio">
                         <p>{contact.about || "Hey there! I am using Snappy."}</p>
                     </div>
@@ -86,7 +83,6 @@ export default function Contacts({ contacts, changeChat }) {
               );
             })}
             
-            {/* Show message if no contacts found */}
             {filteredContacts.length === 0 && (
                 <div className="no-contacts">
                     <p>No contacts found</p>
@@ -110,9 +106,9 @@ export default function Contacts({ contacts, changeChat }) {
 
 const Container = styled.div`
   display: grid;
-  grid-template-rows: 10% 10% 65% 15%; /* Adjusted rows to fit search bar */
+  grid-template-rows: 10% 8% 67% 15%; /* Modernized layout distribution */
   overflow: hidden;
-  background-color: #080420;
+  background-color: var(--bg-darker);
   
   .brand {
     display: flex;
@@ -120,10 +116,13 @@ const Container = styled.div`
     gap: 1rem;
     justify-content: center;
     img { height: 2rem; }
-    h3 { color: white; text-transform: uppercase; }
+    h3 { 
+      color: white; 
+      text-transform: uppercase; 
+      letter-spacing: 1px;
+    }
   }
 
-  /* --- Search Bar Styles --- */
   .search-bar {
     display: flex;
     justify-content: center;
@@ -131,16 +130,23 @@ const Container = styled.div`
     padding: 0 1rem;
     .input-container {
         width: 100%;
-        border-radius: 0.5rem;
+        border-radius: 20px; /* Rounded pill shape for modern look */
         display: flex;
         align-items: center;
         gap: 1rem;
-        background-color: #ffffff34;
-        padding: 0.5rem 1rem;
+        background-color: #ffffff10;
+        border: 1px solid #ffffff20;
+        padding: 0.4rem 1rem;
+        transition: 0.3s ease;
+        
+        &:focus-within {
+            border-color: var(--primary-purple);
+            background: #ffffff15;
+        }
         
         svg {
-            color: white;
-            font-size: 1.2rem;
+            color: var(--text-muted);
+            font-size: 1.1rem;
         }
         
         input {
@@ -148,12 +154,12 @@ const Container = styled.div`
             border: none;
             color: white;
             width: 100%;
-            font-size: 1rem;
+            font-size: 0.9rem;
             &:focus {
                 outline: none;
             }
             &::placeholder {
-                color: #cfcfcf;
+                color: #666;
             }
         }
     }
@@ -167,21 +173,32 @@ const Container = styled.div`
     gap: 0.8rem;
     padding-top: 1rem;
     
-    &::-webkit-scrollbar { width: 0.2rem; &-thumb { background-color: #ffffff39; width: 0.1rem; border-radius: 1rem; } }
+    &::-webkit-scrollbar { 
+      width: 0.2rem; 
+      &-thumb { 
+        background-color: #ffffff39; 
+        width: 0.1rem; 
+        border-radius: 1rem; 
+      } 
+    }
     
     .contact {
-      background-color: #ffffff34;
-      min-height: 4.5rem; /* Slightly compact */
+      min-height: 4.5rem;
       cursor: pointer;
-      width: 90%;
-      border-radius: 0.2rem;
-      padding: 0.4rem;
+      width: 95%; /* Slightly wider for better use of space */
+      border-radius: 0.5rem;
+      padding: 0.7rem;
       display: flex;
       gap: 1rem;
       align-items: center;
       transition: 0.2s ease-in-out;
+      background-color: transparent;
       
-      .avatar { img { height: 3rem; } }
+      &:hover {
+        background-color: #ffffff08;
+      }
+      
+      .avatar { img { height: 2.8rem; } }
       
       .user-details {
           display: flex;
@@ -189,16 +206,35 @@ const Container = styled.div`
           gap: 0.2rem;
           overflow: hidden;
           
-          .username { h3 { color: white; font-size: 1.1rem; } }
-          .bio { p { color: #cfcfcf; font-size: 0.8rem; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; } }
+          .username { 
+            h3 { 
+              color: white; 
+              font-size: 1rem; 
+              font-weight: 500;
+            } 
+          }
+          .bio { 
+            p { 
+              color: var(--text-muted); 
+              font-size: 0.8rem; 
+              overflow: hidden; 
+              white-space: nowrap; 
+              text-overflow: ellipsis; 
+            } 
+          }
       }
     }
     
-    .selected { background-color: #9a86f3; }
+    .selected { 
+      background-color: #ffffff15 !important; 
+      border-left: 4px solid var(--primary-purple);
+      border-radius: 0 0.5rem 0.5rem 0;
+    }
     
     .no-contacts {
-        color: white;
+        color: var(--text-muted);
         margin-top: 2rem;
+        font-size: 0.9rem;
     }
   }
 
@@ -208,8 +244,9 @@ const Container = styled.div`
     justify-content: center;
     align-items: center;
     gap: 2rem;
-    .avatar { img { height: 4rem; max-inline-size: 100%; } }
-    .username { h2 { color: white; } }
+    border-top: 1px solid #ffffff10;
+    .avatar { img { height: 3.5rem; max-inline-size: 100%; } }
+    .username { h2 { color: white; font-size: 1.2rem; } }
     @media screen and (min-width: 720px) and (max-width: 1080px) {
       gap: 0.5rem;
       .username { h2 { font-size: 1rem; } }

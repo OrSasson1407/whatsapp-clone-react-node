@@ -3,12 +3,14 @@ const mongoose = require("mongoose");
 const MessageSchema = mongoose.Schema(
   {
     message: {
-      text: { type: String },
-      audioUrl: { type: String, default: null }, // URL for voice messages
-    },
-    messageType: {
-      type: String,
-      default: "text", // "text" or "audio"
+      text: { type: String, required: false },
+      audioUrl: { type: String, required: false },
+      // New: Generic attachment support (Images, Videos, PDFs)
+      attachment: {
+        url: { type: String }, // Base64 or URL
+        mimeType: { type: String }, // e.g., 'image/png', 'video/mp4'
+        fileName: { type: String },
+      },
     },
     users: Array,
     sender: {
@@ -16,19 +18,27 @@ const MessageSchema = mongoose.Schema(
       ref: "User",
       required: true,
     },
-    groupId: {
+    // New: Reference for threading/replies
+    replyTo: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Groups",
-      default: null,
+      ref: "Messages", 
+      default: null
     },
-    deleted: {
-      type: Boolean,
-      default: false,
+    // New: Reactions array
+    reactions: [
+      {
+        user: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+        emoji: { type: String },
+      }
+    ],
+    // New: Link Preview Metadata
+    linkMetadata: {
+      title: String,
+      description: String,
+      image: String,
+      url: String
     },
-    read: {
-      type: Boolean,
-      default: false,
-    },
+    deleted: { type: Boolean, default: false }
   },
   {
     timestamps: true,

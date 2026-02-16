@@ -6,6 +6,4 @@ export const allUsersRoute = `${host}/api/auth/allusers`;
 export const sendMessageRoute = `${host}/api/messages/addmsg`;
 export const recieveMessageRoute = `${host}/api/messages/getmsg`;
 export const setAvatarRoute = `${host}/api/auth/setavatar`;
-
-// NEW: Added delete route
-export const deleteMessageRoute = `${host}/api/messages/delete`;
+export const addReactionRoute = `${host}/api/messages/reaction`; // New

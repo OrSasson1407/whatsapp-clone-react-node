@@ -1,19 +1,53 @@
 const Messages = require("../models/messageModel");
 
-// --- Add Message ---
+// Get Messages
+module.exports.getMessages = async (req, res, next) => {
+  try {
+    const { from, to } = req.body;
+
+    const messages = await Messages.find({
+      users: {
+        $all: [from, to],
+      },
+    })
+    .sort({ updatedAt: 1 })
+    // Populate the replyTo field to get the original message text
+    .populate('replyTo', 'message sender'); 
+
+    const projectedMessages = messages.map((msg) => {
+      return {
+        fromSelf: msg.sender.toString() === from,
+        message: msg.message,
+        _id: msg._id,
+        createdAt: msg.createdAt,
+        deleted: msg.deleted,
+        // Include new fields in response
+        replyTo: msg.replyTo,
+        reactions: msg.reactions,
+        linkMetadata: msg.linkMetadata
+      };
+    });
+    res.json(projectedMessages);
+  } catch (ex) {
+    next(ex);
+  }
+};
+
+// Add Message
 module.exports.addMessage = async (req, res, next) => {
   try {
-    const { from, to, message, messageType, audioUrl, groupId } = req.body;
+    const { from, to, message, audioUrl, attachment, replyTo, linkMetadata } = req.body;
     
     const data = await Messages.create({
       message: { 
         text: message, 
-        audioUrl: audioUrl || null 
+        audioUrl: audioUrl,
+        attachment: attachment // Save attachment data
       },
-      messageType: messageType || "text",
-      users: groupId ? [] : [from, to], 
+      users: [from, to],
       sender: from,
-      groupId: groupId || null,
+      replyTo: replyTo || null, // Save reply reference
+      linkMetadata: linkMetadata || null
     });
 
     if (data) return res.json({ msg: "Message added successfully.", data });
@@ -23,50 +57,37 @@ module.exports.addMessage = async (req, res, next) => {
   }
 };
 
-// --- NEW: Delete Message (Delete for Everyone) ---
-module.exports.deleteMessage = async (req, res, next) => {
+// New: Add Reaction
+module.exports.addReaction = async (req, res, next) => {
   try {
-    const { messageId } = req.body;
-    const updatedMessage = await Messages.findByIdAndUpdate(
-      messageId,
-      { 
-        deleted: true, 
-        "message.text": "This message was deleted",
-        "message.audioUrl": null 
-      },
-      { new: true }
-    );
-    res.json({ status: true, updatedMessage });
+    const { messageId, userId, emoji } = req.body;
+    
+    const msg = await Messages.findById(messageId);
+    if(!msg) return res.status(404).json({msg: "Message not found"});
+
+    // Remove existing reaction from this user if it exists
+    const existingIndex = msg.reactions.findIndex(r => r.user.toString() === userId);
+    if (existingIndex !== -1) {
+       msg.reactions.splice(existingIndex, 1);
+    }
+
+    // Add new reaction
+    msg.reactions.push({ user: userId, emoji });
+    await msg.save();
+
+    return res.json({ status: true, reactions: msg.reactions });
   } catch (ex) {
     next(ex);
   }
 };
 
-// --- Get Messages ---
-module.exports.getMessages = async (req, res, next) => {
-  try {
-    const { from, to, groupId } = req.body;
-
-    const query = groupId 
-      ? { groupId } 
-      : { users: { $all: [from, to] } };
-
-    const messages = await Messages.find(query).sort({ updatedAt: 1 });
-
-    const projectedMessages = messages.map((msg) => {
-      return {
-        _id: msg._id,
-        fromSelf: msg.sender.toString() === from,
-        message: msg.message,
-        messageType: msg.messageType,
-        deleted: msg.deleted,
-        read: msg.read,
-        createdAt: msg.createdAt,
-      };
-    });
-    
-    return res.json(projectedMessages);
-  } catch (ex) {
-    next(ex);
-  }
+// Delete Message (Existing functionality kept for safety)
+module.exports.deleteMessage = async (req, res, next) => {
+    try {
+        const { messageId } = req.body;
+        await Messages.findByIdAndUpdate(messageId, { deleted: true });
+        return res.json({ status: true, msg: "Message deleted" });
+    } catch (ex) {
+        next(ex);
+    }
 };
