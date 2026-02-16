@@ -1,53 +1,71 @@
 const Messages = require("../models/messageModel");
 
+// --- Add Message ---
 module.exports.addMessage = async (req, res, next) => {
   try {
-    const { from, to, message } = req.body;
+    const { from, to, message, messageType, audioUrl, groupId } = req.body;
+    
     const data = await Messages.create({
-      message: { text: message },
-      users: [from, to],
+      message: { 
+        text: message, 
+        audioUrl: audioUrl || null 
+      },
+      messageType: messageType || "text",
+      users: groupId ? [] : [from, to], 
       sender: from,
+      groupId: groupId || null,
     });
 
-    if (data) return res.json({ msg: "Message added successfully." });
+    if (data) return res.json({ msg: "Message added successfully.", data });
     else return res.json({ msg: "Failed to add message to the database" });
   } catch (ex) {
     next(ex);
   }
 };
 
+// --- NEW: Delete Message (Delete for Everyone) ---
+module.exports.deleteMessage = async (req, res, next) => {
+  try {
+    const { messageId } = req.body;
+    const updatedMessage = await Messages.findByIdAndUpdate(
+      messageId,
+      { 
+        deleted: true, 
+        "message.text": "This message was deleted",
+        "message.audioUrl": null 
+      },
+      { new: true }
+    );
+    res.json({ status: true, updatedMessage });
+  } catch (ex) {
+    next(ex);
+  }
+};
+
+// --- Get Messages ---
 module.exports.getMessages = async (req, res, next) => {
   try {
-    const { from, to } = req.body;
+    const { from, to, groupId } = req.body;
 
-    // 1. Mark messages from the 'other' user (to) as read, 
-    // because 'from' (current user) is requesting to see them now.
-    await Messages.updateMany(
-      { 
-        users: { $all: [from, to] },
-        sender: to, 
-        read: false 
-      },
-      { $set: { read: true } }
-    );
+    const query = groupId 
+      ? { groupId } 
+      : { users: { $all: [from, to] } };
 
-    // 2. Fetch the messages
-    const messages = await Messages.find({
-      users: {
-        $all: [from, to],
-      },
-    }).sort({ updatedAt: 1 });
+    const messages = await Messages.find(query).sort({ updatedAt: 1 });
 
     const projectedMessages = messages.map((msg) => {
       return {
+        _id: msg._id,
         fromSelf: msg.sender.toString() === from,
-        message: msg.message.text,
-        read: msg.read, // Send the read status to frontend
-        time: msg.createdAt, // Send time for display
+        message: msg.message,
+        messageType: msg.messageType,
+        deleted: msg.deleted,
+        read: msg.read,
+        createdAt: msg.createdAt,
       };
     });
     
-    res.json(projectedMessages);
+    return res.json(projectedMessages);
   } catch (ex) {
     next(ex);
   }

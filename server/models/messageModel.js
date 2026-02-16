@@ -3,23 +3,35 @@ const mongoose = require("mongoose");
 const MessageSchema = mongoose.Schema(
   {
     message: {
-      text: { type: String }, // Plain text content
-      fileUrl: { type: String, default: null }, // URL for uploaded images/files
-      messageType: { type: String, default: "text" }, // Options: "text", "image", "file"
+      text: { type: String },
+      audioUrl: { type: String, default: null }, // URL for voice messages
     },
-    users: Array, // [senderId, receiverId]
+    messageType: {
+      type: String,
+      default: "text", // "text" or "audio"
+    },
+    users: Array,
     sender: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
     },
+    groupId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Groups",
+      default: null,
+    },
+    deleted: {
+      type: Boolean,
+      default: false,
+    },
     read: {
       type: Boolean,
-      default: false, // Tracks if the receiver has opened the chat
+      default: false,
     },
   },
   {
-    timestamps: true, // Automatically manages createdAt and updatedAt for message timing
+    timestamps: true,
   }
 );
 

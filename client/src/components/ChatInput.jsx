@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { BsEmojiSmileFill } from "react-icons/bs";
+import React, { useState, useRef } from "react";
+import { BsEmojiSmileFill, BsMicFill, BsFillStopFill } from "react-icons/bs";
 import { IoMdSend } from "react-icons/io";
 import styled from "styled-components";
 import Picker from "emoji-picker-react";
@@ -7,7 +7,11 @@ import Picker from "emoji-picker-react";
 export default function ChatInput({ handleSendMsg, handleTyping }) {
   const [msg, setMsg] = useState("");
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
   
+  const mediaRecorder = useRef(null);
+  const audioChunks = useRef([]);
+
   const handleEmojiPickerhideShow = () => {
     setShowEmojiPicker(!showEmojiPicker);
   };
@@ -16,28 +20,58 @@ export default function ChatInput({ handleSendMsg, handleTyping }) {
     let message = msg;
     message += emojiObject.emoji;
     setMsg(message);
-    
-    // Trigger typing when emoji is added
     if (handleTyping) handleTyping(true);
+  };
+
+  // --- Voice Message logic using Web Audio API ---
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaRecorder.current = new MediaRecorder(stream);
+      audioChunks.current = [];
+
+      mediaRecorder.current.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunks.current.push(e.data);
+      };
+
+      mediaRecorder.current.onstop = () => {
+        const audioBlob = new Blob(audioChunks.current, { type: "audio/wav" });
+        const reader = new FileReader();
+        reader.readAsDataURL(audioBlob);
+        reader.onloadend = () => {
+          handleSendMsg(reader.result, "audio"); // Sends the recorded audio as base64
+        };
+      };
+
+      mediaRecorder.current.start();
+      setIsRecording(true);
+      if (handleTyping) handleTyping(true);
+    } catch (err) {
+      console.error("Microphone access denied:", err);
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorder.current) {
+      mediaRecorder.current.stop();
+      setIsRecording(false);
+      if (handleTyping) handleTyping(false);
+    }
   };
 
   const sendChat = (event) => {
     event.preventDefault();
     if (msg.length > 0) {
-      handleSendMsg(msg);
+      handleSendMsg(msg, "text");
       setMsg("");
-      // Stop typing immediately after sending
       if (handleTyping) handleTyping(false);
     }
   };
 
-  // New handler to manage typing state
   const handleChange = (e) => {
     setMsg(e.target.value);
-    
     if (handleTyping) {
-       // If length > 0, we are typing. If 0, we stopped.
-       handleTyping(e.target.value.length > 0);
+      handleTyping(e.target.value.length > 0);
     }
   };
 
@@ -48,13 +82,21 @@ export default function ChatInput({ handleSendMsg, handleTyping }) {
           <BsEmojiSmileFill onClick={handleEmojiPickerhideShow} />
           {showEmojiPicker && <Picker onEmojiClick={handleEmojiClick} />}
         </div>
+        <div className="mic-container">
+          {isRecording ? (
+            <BsFillStopFill className="recording" onClick={stopRecording} />
+          ) : (
+            <BsMicFill onClick={startRecording} />
+          )}
+        </div>
       </div>
       <form className="input-container" onSubmit={(event) => sendChat(event)}>
         <input
           type="text"
           placeholder="type your message here"
-          onChange={handleChange} 
+          onChange={handleChange}
           value={msg}
+          disabled={isRecording}
         />
         <button type="submit">
           <IoMdSend />
@@ -67,7 +109,7 @@ export default function ChatInput({ handleSendMsg, handleTyping }) {
 const Container = styled.div`
   display: grid;
   align-items: center;
-  grid-template-columns: 5% 95%;
+  grid-template-columns: 10% 90%;
   background-color: #080420;
   padding: 0 2rem;
   @media screen and (min-width: 720px) and (max-width: 1080px) {
@@ -81,39 +123,21 @@ const Container = styled.div`
     gap: 1rem;
     .emoji {
       position: relative;
-      svg {
-        font-size: 1.5rem;
-        color: #ffff00c8;
-        cursor: pointer;
-      }
+      svg { font-size: 1.5rem; color: #ffff00c8; cursor: pointer; }
       .emoji-picker-react {
         position: absolute;
         top: -350px;
         background-color: #080420;
         box-shadow: 0 5px 10px #9a86f3;
         border-color: #9a86f3;
-        .emoji-scroll-wrapper::-webkit-scrollbar {
-          background-color: #080420;
-          width: 5px;
-          &-thumb {
-            background-color: #9a86f3;
-          }
-        }
-        .emoji-categories {
-          button {
-            filter: contrast(0);
-          }
-        }
-        .emoji-search {
-          background-color: transparent;
-          border-color: #9a86f3;
-        }
-        .emoji-group:before {
-          background-color: #080420;
-        }
       }
     }
+    .mic-container {
+      svg { font-size: 1.5rem; color: white; cursor: pointer; }
+      .recording { color: #ff4b4b; animation: pulse 1s infinite; }
+    }
   }
+  @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
   .input-container {
     width: 100%;
     border-radius: 2rem;
@@ -129,13 +153,7 @@ const Container = styled.div`
       border: none;
       padding-left: 1rem;
       font-size: 1.2rem;
-
-      &::selection {
-        background-color: #9a86f3;
-      }
-      &:focus {
-        outline: none;
-      }
+      &:focus { outline: none; }
     }
     button {
       padding: 0.3rem 2rem;
@@ -145,16 +163,7 @@ const Container = styled.div`
       align-items: center;
       background-color: #9a86f3;
       border: none;
-      @media screen and (min-width: 720px) and (max-width: 1080px) {
-        padding: 0.3rem 1rem;
-        svg {
-          font-size: 1rem;
-        }
-      }
-      svg {
-        font-size: 2rem;
-        color: white;
-      }
+      svg { font-size: 2rem; color: white; }
     }
   }
 `;
