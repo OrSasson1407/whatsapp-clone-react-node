@@ -27,16 +27,16 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: "",
   },
-  // --- NEW FEATURES ---
+  // --- UPGRADE FIELDS ---
   about: {
     type: String,
-    default: "Hey there! I am using Snappy.", // Default WhatsApp-style bio
+    default: "Hey there! I am using Snappy.", // Professional status message
     max: 50,
   },
   isOnline: {
     type: Boolean,
-    default: false, // Helps track if user is currently connected
-  }
+    default: false, // Tracks active socket connections in the DB
+  },
 });
 
 module.exports = mongoose.model("Users", userSchema);

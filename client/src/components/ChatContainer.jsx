@@ -5,114 +5,118 @@ import Logout from "./Logout";
 import { v4 as uuidv4 } from "uuid";
 import axios from "axios";
 import { sendMessageRoute, recieveMessageRoute } from "../utils/APIRoutes";
-import { IoCheckmarkDone, IoCheckmark } from "react-icons/io5"; // Import icons
+import { IoCheckmarkDone, IoCheckmark } from "react-icons/io5"; // For status ticks
 
 export default function ChatContainer({ currentChat, socket }) {
   const [messages, setMessages] = useState([]);
   const [arrivalMessage, setArrivalMessage] = useState(null);
-  const [isTyping, setIsTyping] = useState(false); // Typing state
+  const [isTyping, setIsTyping] = useState(false); // Tracks if the friend is typing
   const scrollRef = useRef();
 
-  // Fetch chat history from DB
+  // 1. Fetch Chat History and Notify Server of Read Status
   useEffect(() => {
     async function fetchMessages() {
       if (currentChat) {
-        const data = await JSON.parse(
-          sessionStorage.getItem("chat-app-user")
-        );
+        const data = await JSON.parse(sessionStorage.getItem("chat-app-user"));
         const response = await axios.post(recieveMessageRoute, {
           from: data._id,
           to: currentChat._id,
         });
         setMessages(response.data);
+
+        // When opening the chat, notify the sender that existing messages are read
+        socket.current.emit("msg-read", {
+          to: currentChat._id,
+          from: data._id,
+        });
       }
     }
     fetchMessages();
   }, [currentChat]);
 
-  // Handle Fetch Current User for referencing
-  useEffect(() => {
-    const getCurrentChat = async () => {
-      if (currentChat) {
-        await JSON.parse(sessionStorage.getItem("chat-app-user"))._id;
-      }
-    };
-    getCurrentChat();
-  }, [currentChat]);
-
-  // Send Message Handler
-  const handleSendMsg = async (msg) => {
-    const data = await JSON.parse(
-      sessionStorage.getItem("chat-app-user")
-    );
+  // 2. Handle Sending Messages (Supports text and multimedia)
+  const handleSendMsg = async (msg, fileData = null) => {
+    const data = await JSON.parse(sessionStorage.getItem("chat-app-user"));
     
-    // Stop typing before sending
+    // Stop typing status on server before sending
     socket.current.emit("stop-typing", {
       to: currentChat._id,
-      from: data._id
+      from: data._id,
     });
 
-    // 1. Send to socket server (Real-time)
-    socket.current.emit("send-msg", {
+    const messagePayload = {
       to: currentChat._id,
       from: data._id,
-      msg,
-    });
+      msg: fileData ? "" : msg,
+      fileUrl: fileData?.url || null,
+      messageType: fileData ? "image" : "text",
+    };
 
-    // 2. Save to database
-    await axios.post(sendMessageRoute, {
-      from: data._id,
-      to: currentChat._id,
-      message: msg,
-    });
+    // Real-time emit
+    socket.current.emit("send-msg", messagePayload);
 
-    // 3. Update local state immediately (default read: false)
+    // Save to DB
+    await axios.post(sendMessageRoute, messagePayload);
+
+    // Update local UI immediately with timestamp and status
     const msgs = [...messages];
-    msgs.push({ fromSelf: true, message: msg, read: false });
+    msgs.push({ 
+      fromSelf: true, 
+      message: messagePayload.msg,
+      fileUrl: messagePayload.fileUrl,
+      messageType: messagePayload.messageType,
+      read: false, 
+      createdAt: new Date() 
+    });
     setMessages(msgs);
   };
 
-  // Helper to handle typing events from Input
-  const handleTyping = async (typing) => {
-    const data = await JSON.parse(sessionStorage.getItem("chat-app-user"));
+  // 3. Handle Typing logic from Input component
+  const handleTyping = (typing) => {
+    const data = JSON.parse(sessionStorage.getItem("chat-app-user"));
     if (typing) {
       socket.current.emit("typing", { to: currentChat._id, from: data._id });
     } else {
       socket.current.emit("stop-typing", { to: currentChat._id, from: data._id });
     }
-  }
+  };
 
-  // Listen for incoming messages & events from Socket
+  // 4. Socket Listeners for Real-time Events
   useEffect(() => {
     if (socket.current) {
-      // Message Received
-      socket.current.on("msg-recieve", (msg) => {
-        setArrivalMessage({ fromSelf: false, message: msg, read: false });
-        // If we are looking at this chat, tell sender we read it
+      // Receive Message
+      socket.current.on("msg-recieve", (data) => {
+        setArrivalMessage({ 
+          fromSelf: false, 
+          message: data.msg, 
+          fileUrl: data.fileUrl, 
+          messageType: data.messageType 
+        });
+        
+        // Auto-read if the chat is currently open
         const user = JSON.parse(sessionStorage.getItem("chat-app-user"));
         socket.current.emit("msg-read", { to: currentChat._id, from: user._id });
       });
 
-      // Typing Events
+      // Typing Indicators
       socket.current.on("typing-recieve", () => setIsTyping(true));
       socket.current.on("stop-typing-recieve", () => setIsTyping(false));
 
-      // Read Receipt Event
+      // Read Receipts (When the friend reads YOUR message)
       socket.current.on("msg-read-recieve", () => {
-         // Update all local messages to be 'read'
-         setMessages((prev) => 
-            prev.map(msg => msg.fromSelf ? { ...msg, read: true } : msg)
-         );
+        setMessages((prev) => 
+          prev.map((m) => (m.fromSelf ? { ...m, read: true } : m))
+        );
       });
     }
-  }, [currentChat]); // Re-attach listeners if chat changes
+  }, [currentChat]);
 
-  // Update messages list when arrivalMessage changes
+  // 5. Arrival Message Sync
   useEffect(() => {
     arrivalMessage && setMessages((prev) => [...prev, arrivalMessage]);
   }, [arrivalMessage]);
 
-  // Auto-scroll to bottom
+  // 6. Auto-scroll to bottom
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isTyping]);
@@ -124,7 +128,7 @@ export default function ChatContainer({ currentChat, socket }) {
           <div className="avatar">
             <img
               src={`data:image/svg+xml;base64,${currentChat.avatarImage}`}
-              alt=""
+              alt="avatar"
             />
           </div>
           <div className="username">
@@ -134,47 +138,54 @@ export default function ChatContainer({ currentChat, socket }) {
         </div>
         <Logout />
       </div>
+
       <div className="chat-messages">
         {messages.map((message) => {
           return (
             <div ref={scrollRef} key={uuidv4()}>
-              <div
-                className={`message ${
-                  message.fromSelf ? "sended" : "recieved"
-                }`}
-              >
+              <div className={`message ${message.fromSelf ? "sended" : "recieved"}`}>
                 <div className="content">
-                  <p>{message.message}</p>
-                  
-                  {/* Status Ticks Logic (Only for Sent messages) */}
-                  {message.fromSelf && (
-                    <div className="status-ticks">
-                      {message.read ? (
-                         <IoCheckmarkDone className="icon-read" /> // Blue ticks
-                      ) : (
-                         <IoCheckmark className="icon-sent" /> // Grey tick
-                      )}
-                    </div>
+                  {message.messageType === "image" ? (
+                    <img src={message.fileUrl} alt="sent-file" className="sent-img" />
+                  ) : (
+                    <p>{message.message}</p>
                   )}
+                  
+                  <div className="meta">
+                    <span className="time">
+                      {new Date(message.createdAt).toLocaleTimeString([], { 
+                        hour: '2-digit', 
+                        minute: '2-digit' 
+                      })}
+                    </span>
+                    {message.fromSelf && (
+                      <div className="status-ticks">
+                        {message.read ? (
+                           <IoCheckmarkDone className="icon-read" />
+                        ) : (
+                           <IoCheckmark className="icon-sent" />
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
           );
         })}
-
-        {/* Typing Bubble Animation */}
+        
+        {/* Typing Animation Bubble */}
         {isTyping && (
-             <div className="message recieved" ref={scrollRef}>
-                <div className="content typing-bubble">
-                   <div className="dot"></div>
-                   <div className="dot"></div>
-                   <div className="dot"></div>
-                </div>
-             </div>
+          <div className="message recieved">
+            <div className="content typing-bubble">
+              <div className="dot"></div>
+              <div className="dot"></div>
+              <div className="dot"></div>
+            </div>
+          </div>
         )}
       </div>
       
-      {/* Pass handleTyping to Input */}
       <ChatInput handleSendMsg={handleSendMsg} handleTyping={handleTyping} />
     </Container>
   );
@@ -185,6 +196,7 @@ const Container = styled.div`
   grid-template-rows: 10% 80% 10%;
   gap: 0.1rem;
   overflow: hidden;
+  background-color: #131324;
   @media screen and (min-width: 720px) and (max-width: 1080px) {
     grid-template-rows: 15% 70% 15%;
   }
@@ -197,21 +209,14 @@ const Container = styled.div`
       display: flex;
       align-items: center;
       gap: 1rem;
-      .avatar {
-        img {
-          height: 3rem;
-        }
-      }
+      .avatar img { height: 3rem; }
       .username {
-        h3 {
-          color: white;
-        }
+        h3 { color: white; }
         .typing-status {
             color: #00ff00;
             font-size: 0.8rem;
             margin-left: 10px;
             font-weight: bold;
-            animation: pulse 1s infinite;
         }
       }
     }
@@ -224,84 +229,44 @@ const Container = styled.div`
     overflow: auto;
     &::-webkit-scrollbar {
       width: 0.2rem;
-      &-thumb {
-        background-color: #ffffff39;
-        width: 0.1rem;
-        border-radius: 1rem;
-      }
+      &-thumb { background-color: #ffffff39; width: 0.1rem; border-radius: 1rem; }
     }
     .message {
       display: flex;
       align-items: center;
       .content {
-        max-width: 40%;
+        max-width: 45%;
         overflow-wrap: break-word;
-        padding: 1rem;
+        padding: 0.8rem;
         font-size: 1.1rem;
         border-radius: 1rem;
         color: #d1d1d1;
-        display: flex; 
-        flex-direction: column; /* Stacks text and ticks vertically */
-        
-        .status-ticks {
+        display: flex;
+        flex-direction: column;
+        .sent-img { max-width: 100%; border-radius: 0.5rem; margin-bottom: 5px; }
+        .meta {
             display: flex;
             justify-content: flex-end;
-            margin-top: 5px;
-            font-size: 1.2rem;
-            .icon-read {
-                color: #4fc3f7; /* WhatsApp Blue */
+            align-items: center;
+            gap: 5px;
+            margin-top: 4px;
+            .time { font-size: 0.65rem; color: #a1a1a1; }
+            .status-ticks {
+                font-size: 1rem;
+                .icon-read { color: #4fc3f7; }
+                .icon-sent { color: #888; }
             }
-            .icon-sent {
-                color: #grey;
-            }
-        }
-
-        @media screen and (min-width: 720px) and (max-width: 1080px) {
-          max-width: 70%;
         }
       }
     }
-    .sended {
-      justify-content: flex-end;
-      .content {
-        background-color: #4f04ff21;
-      }
-    }
-    .recieved {
-      justify-content: flex-start;
-      .content {
-        background-color: #9900ff20;
-      }
-    }
-
-    /* Typing Bubble CSS */
+    .sended { justify-content: flex-end; .content { background-color: #4f04ff21; } }
+    .recieved { justify-content: flex-start; .content { background-color: #9900ff20; } }
     .typing-bubble {
-        display: flex;
-        flex-direction: row !important;
-        gap: 5px;
-        padding: 15px !important;
-        min-width: 60px;
-        align-items: center;
-        justify-content: center;
-        
-        .dot {
-            width: 8px;
-            height: 8px;
-            background: #b3b3b3;
-            border-radius: 50%;
-            animation: bounce 1.5s infinite;
-        }
+        display: flex; flex-direction: row !important; gap: 4px; padding: 12px !important;
+        .dot { width: 6px; height: 6px; background: #b3b3b3; border-radius: 50%; animation: bounce 1.4s infinite; }
         .dot:nth-child(2) { animation-delay: 0.2s; }
         .dot:nth-child(3) { animation-delay: 0.4s; }
     }
-    @keyframes bounce {
-        0%, 100% { transform: translateY(0); }
-        50% { transform: translateY(-5px); }
-    }
-    @keyframes pulse {
-        0% { opacity: 0.5; }
-        50% { opacity: 1; }
-        100% { opacity: 0.5; }
-    }
+    @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
   }
 `;

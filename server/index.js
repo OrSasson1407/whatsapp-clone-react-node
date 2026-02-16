@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
 const socket = require("socket.io");
+const User = require("./models/userModel"); // Added for online status updates
 require("dotenv").config(); // Load environment variables from .env file
 
 // Import Routes
@@ -13,14 +14,21 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // --- Middleware Setup ---
+
+// Enable CORS (Cross-Origin Resource Sharing)
 app.use(cors());
+
+// Parse incoming JSON requests
 app.use(express.json());
 
 // --- Routes Configuration ---
+
+// Auth and Message routes
 app.use("/api/auth", authRoutes);
 app.use("/api/messages", messageRoutes); 
 
 // --- Database Connection ---
+
 mongoose
   .connect(process.env.MONGO_URL)
   .then(() => {
@@ -31,11 +39,13 @@ mongoose
   });
 
 // --- Server Startup ---
+
 const server = app.listen(PORT, () => {
   console.log(`Server Started on Port ${PORT}`);
 });
 
 // --- Socket.io Setup (Real-Time Communication) ---
+
 const io = socket(server, {
   cors: {
     origin: "http://localhost:5173",
@@ -46,24 +56,31 @@ const io = socket(server, {
 // Global Map to store online users (userId -> socketId)
 global.onlineUsers = new Map();
 
-// Listen for new connections from clients
 io.on("connection", (socket) => {
   global.chatSocket = socket;
   
   // Event: User joins the chat
-  socket.on("add-user", (userId) => {
+  socket.on("add-user", async (userId) => {
     onlineUsers.set(userId, socket.id);
+    // Persist online status to the database
+    await User.findByIdAndUpdate(userId, { isOnline: true });
+    // Notify others that this user is online
+    socket.broadcast.emit("user-status-change", { userId, isOnline: true });
   });
 
-  // Event: Send Message
+  // Event: Send Message (Handles text and multimedia payloads)
   socket.on("send-msg", (data) => {
     const sendUserSocket = onlineUsers.get(data.to);
     if (sendUserSocket) {
-      socket.to(sendUserSocket).emit("msg-recieve", data.msg);
+      socket.to(sendUserSocket).emit("msg-recieve", {
+        msg: data.msg,
+        fileUrl: data.fileUrl,
+        messageType: data.messageType,
+      });
     }
   });
 
-  // --- NEW: Typing Indicators ---
+  // --- UPGRADE: Typing Indicators ---
   socket.on("typing", (data) => {
     const sendUserSocket = onlineUsers.get(data.to);
     if (sendUserSocket) {
@@ -78,17 +95,30 @@ io.on("connection", (socket) => {
     }
   });
 
-  // --- NEW: Read Receipts ---
+  // --- UPGRADE: Read Receipts ---
   socket.on("msg-read", (data) => {
     const sendUserSocket = onlineUsers.get(data.to);
     if (sendUserSocket) {
-      // Notify the original sender that their message was read
+      // Notify the sender that their specific messages were viewed
       socket.to(sendUserSocket).emit("msg-read-recieve", data.from);
     }
   });
 
-  // Event: Disconnect
-  socket.on("disconnect", () => {
-    // You might want to remove the user from onlineUsers here
+  // Event: Disconnect logic with database sync
+  socket.on("disconnect", async () => {
+    let disconnectedUserId;
+    for (let [userId, socketId] of onlineUsers.entries()) {
+      if (socketId === socket.id) {
+        disconnectedUserId = userId;
+        onlineUsers.delete(userId);
+        break;
+      }
+    }
+    if (disconnectedUserId) {
+      // Mark user offline in DB and notify peers
+      await User.findByIdAndUpdate(disconnectedUserId, { isOnline: false });
+      socket.broadcast.emit("user-status-change", { userId: disconnectedUserId, isOnline: false });
+    }
+    console.log("User disconnected:", socket.id);
   });
 });
