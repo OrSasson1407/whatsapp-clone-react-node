@@ -29,3 +29,47 @@ module.exports.getUserGroups = async (req, res, next) => {
         next(ex);
     }
 };
+
+module.exports.addMember = async (req, res, next) => {
+    try {
+        const { groupId, userId } = req.body;
+
+        const group = await Group.findByIdAndUpdate(
+            groupId,
+            { 
+                $addToSet: { members: userId } // $addToSet prevents duplicates
+            },
+            { new: true }
+        ).populate("members", "username avatarImage");
+
+        if (!group) {
+            return res.json({ status: false, msg: "Group not found" });
+        }
+
+        return res.json({ status: true, group });
+    } catch (ex) {
+        next(ex);
+    }
+};
+
+module.exports.removeMember = async (req, res, next) => {
+    try {
+        const { groupId, userId } = req.body;
+
+        const group = await Group.findByIdAndUpdate(
+            groupId,
+            { 
+                $pull: { members: userId } // $pull removes the item from the array
+            },
+            { new: true }
+        ).populate("members", "username avatarImage");
+
+        if (!group) {
+            return res.json({ status: false, msg: "Group not found" });
+        }
+
+        return res.json({ status: true, group });
+    } catch (ex) {
+        next(ex);
+    }
+};

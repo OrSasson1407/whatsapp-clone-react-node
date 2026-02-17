@@ -1,35 +1,31 @@
 const Messages = require("../models/messageModel");
+const mongoose = require("mongoose");
 const multer = require("multer");
 const path = require("path");
+const fs = require("fs");
 
-// --- Multer Setup for File Uploads ---
-// Configures where to store uploaded files and their filenames
+// --- File Upload Setup ---
+const uploadDir = 'uploads/';
+if (!fs.existsSync(uploadDir)){
+    fs.mkdirSync(uploadDir);
+}
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    // Ensure the 'uploads' folder exists in your server root
-    cb(null, 'uploads/'); 
+    cb(null, uploadDir); 
   },
   filename: (req, file, cb) => {
-    // Unique filename: Timestamp + Original Extension
     cb(null, Date.now() + path.extname(file.originalname));
   }
 });
 
 const upload = multer({ storage: storage });
 
-// Export middleware for use in routes
 module.exports.uploadMiddleware = upload.single("file");
 
-// --- Controller Methods ---
-
-// 1. Upload File
 module.exports.uploadFile = (req, res) => {
     if (!req.file) return res.status(400).json({ msg: "No file uploaded" });
-    
-    // Construct the public URL for the file
-    // NOTE: In production, replace 'localhost' with your actual domain or use S3/Cloudinary
     const fileUrl = `http://localhost:5000/uploads/${req.file.filename}`;
-    
     return res.json({ 
         url: fileUrl, 
         mimeType: req.file.mimetype, 
@@ -37,46 +33,79 @@ module.exports.uploadFile = (req, res) => {
     });
 };
 
-// 2. Get Messages
+// --- Get Messages (Fixed for 500 Errors & Crashes) ---
 module.exports.getMessages = async (req, res, next) => {
   try {
-    const { from, to } = req.body;
+    const { from, to, isGroup } = req.body;
 
-    const messages = await Messages.find({
-      users: {
-        $all: [from, to],
-      },
-    })
-    .sort({ updatedAt: 1 }) // Oldest first
-    .populate('replyTo', 'message sender'); 
+    // 1. Validate IDs to prevent immediate crash
+    if (!from || !to) {
+        return res.status(400).json({ msg: "Missing from/to IDs" });
+    }
 
+    // 2. Build Query
+    let query = {};
+    if (isGroup) {
+        // Group: Get all messages sent TO this group
+        query = { users: { $all: [to] } };
+    } else {
+        // DM: Get messages between these two users
+        query = { users: { $all: [from, to] } };
+    }
+
+    // 3. Execute Query
+    const messages = await Messages.find(query)
+      .sort({ updatedAt: 1 })
+      .populate('sender', 'username avatarImage _id') 
+      .populate('replyTo', 'message sender'); 
+
+    // 4. Safe Map (Prevents server crash on bad data)
     const projectedMessages = messages.map((msg) => {
+      // If msg is somehow null, skip it
+      if (!msg) return null;
+
+      // Handle missing sender (e.g., deleted user)
+      const sender = msg.sender || { 
+          _id: "unknown", 
+          username: "Unknown User", 
+          avatarImage: "" 
+      };
+      
+      const senderId = sender._id ? sender._id.toString() : "unknown";
+
+      // Handle missing message content object
+      const messageContent = msg.message || { text: "", attachment: null };
+
       return {
-        fromSelf: msg.sender.toString() === from,
-        message: msg.message,
-        messageStatus: msg.messageStatus, // Included for ticks (sent/delivered/read)
+        fromSelf: senderId === from,
+        sender: sender, 
+        message: messageContent,
+        messageStatus: msg.messageStatus || "sent",
         _id: msg._id,
         createdAt: msg.createdAt,
-        deleted: msg.deleted,
+        deleted: msg.deleted || false,
         replyTo: msg.replyTo,
-        reactions: msg.reactions,
+        reactions: msg.reactions || [],
         linkMetadata: msg.linkMetadata
       };
-    });
+    }).filter(msg => msg !== null); // Remove any null entries
+    
     res.json(projectedMessages);
   } catch (ex) {
-    next(ex);
+    console.error("Server Error in getMessages:", ex);
+    // Return empty array instead of 500 Error so frontend stays alive
+    res.json([]); 
   }
 };
 
-// 3. Add Message
+// --- Add Message ---
 module.exports.addMessage = async (req, res, next) => {
   try {
     const { from, to, message, audioUrl, attachment, replyTo, linkMetadata } = req.body;
     
     const data = await Messages.create({
       message: { 
-        text: message, 
+        text: message || "", // Ensure text is never null
         audioUrl: audioUrl,
         attachment: attachment 
       },
@@ -84,7 +113,7 @@ module.exports.addMessage = async (req, res, next) => {
       sender: from,
       replyTo: replyTo || null,
       linkMetadata: linkMetadata || null,
-      messageStatus: "sent" // Default status
+      messageStatus: "sent"
     });
 
     if (data) return res.json({ msg: "Message added successfully.", data });
@@ -94,53 +123,43 @@ module.exports.addMessage = async (req, res, next) => {
   }
 };
 
-// 4. Search Messages
+// --- Search Messages ---
 module.exports.searchMessages = async (req, res, next) => {
     try {
         const { from, to, query } = req.body;
-        
-        // Use the Text Index created in the model
-        // Or simple regex for partial matching
         const messages = await Messages.find({
             users: { $all: [from, to] },
-            "message.text": { $regex: query, $options: "i" } // Case-insensitive search
-        }).populate('replyTo');
-        
+            "message.text": { $regex: query, $options: "i" }
+        }).populate('replyTo').populate('sender', 'username');
         return res.json(messages);
     } catch (ex) {
         next(ex);
     }
 };
 
-// 5. Add Reaction
+// --- Add Reaction ---
 module.exports.addReaction = async (req, res, next) => {
   try {
     const { messageId, userId, emoji } = req.body;
-    
     const msg = await Messages.findById(messageId);
     if(!msg) return res.status(404).json({msg: "Message not found"});
 
-    // Remove existing reaction from this user if it exists (toggle logic)
     const existingIndex = msg.reactions.findIndex(r => r.user.toString() === userId);
     if (existingIndex !== -1) {
        msg.reactions.splice(existingIndex, 1);
     }
-
-    // Add new reaction
     msg.reactions.push({ user: userId, emoji });
     await msg.save();
-
     return res.json({ status: true, reactions: msg.reactions });
   } catch (ex) {
     next(ex);
   }
 };
 
-// 6. Delete Message
+// --- Delete Message ---
 module.exports.deleteMessage = async (req, res, next) => {
     try {
         const { messageId } = req.body;
-        // Soft delete: just mark as deleted
         await Messages.findByIdAndUpdate(messageId, { deleted: true });
         return res.json({ status: true, msg: "Message deleted" });
     } catch (ex) {

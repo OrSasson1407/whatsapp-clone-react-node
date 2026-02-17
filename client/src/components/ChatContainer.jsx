@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useContext } from "react";
 import styled from "styled-components";
 import ChatInput from "./ChatInput";
+import GroupInfo from "./GroupInfo"; 
 import Logout from "./Logout";
 import { v4 as uuidv4 } from "uuid";
 import axios from "axios";
@@ -13,9 +14,9 @@ import {
   IoCheckmarkDone, 
   IoCheckmark, 
   IoSearch, 
-  IoMoon, 
-  IoSunny,
-  IoArrowBack 
+  IoInformationCircleOutline,
+  IoMoon,
+  IoSunny
 } from "react-icons/io5";
 import { ThemeContext } from "../App";
 
@@ -24,8 +25,8 @@ export default function ChatContainer({ currentChat, socket }) {
   const [arrivalMessage, setArrivalMessage] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [showSearch, setShowSearch] = useState(false);
+  const [showGroupInfo, setShowGroupInfo] = useState(false);
   
-  // Local state to track the chat partner's online status in real-time
   const [chatUserStatus, setChatUserStatus] = useState({
     isOnline: currentChat?.isOnline || false,
     lastSeen: currentChat?.lastSeen || null
@@ -34,94 +35,128 @@ export default function ChatContainer({ currentChat, socket }) {
   const scrollRef = useRef();
   const { theme, toggleTheme } = useContext(ThemeContext);
 
-  // Sync local status state when switching chats
   useEffect(() => {
     setChatUserStatus({
       isOnline: currentChat.isOnline,
       lastSeen: currentChat.lastSeen
     });
+    setShowGroupInfo(false);
+    setMessages([]); // Clear chat immediately on switch
   }, [currentChat]);
 
-  // --- Fetch Messages & Mark as Read ---
+  // --- FETCH MESSAGES ---
   useEffect(() => {
     async function fetchMessages() {
-      if (currentChat) {
-        const data = await JSON.parse(sessionStorage.getItem("chat-app-user"));
-        const response = await axios.post(recieveMessageRoute, {
-          from: data._id,
-          to: currentChat._id,
-        });
-        setMessages(response.data);
-        
-        // Emit 'Read' event immediately when opening the chat
-        socket.current.emit("msg-read", { to: data._id, from: currentChat._id });
+      if (currentChat && currentChat._id) {
+        const userData = await JSON.parse(sessionStorage.getItem("chat-app-user"));
+        if (!userData || !userData._id) return;
+
+        try {
+            const response = await axios.post(recieveMessageRoute, {
+                from: userData._id,
+                to: currentChat._id,
+                isGroup: currentChat.isGroup || false,
+            });
+
+            if (Array.isArray(response.data)) {
+                setMessages(response.data);
+            } else {
+                setMessages([]);
+            }
+
+            if(socket.current) {
+                socket.current.emit("msg-read", { to: userData._id, from: currentChat._id });
+            }
+        } catch (err) {
+            console.error("Error fetching messages:", err);
+        }
       }
     }
     fetchMessages();
   }, [currentChat]);
 
-  // --- Socket Event Listeners ---
+  // --- SOCKET LISTENERS (FIXED) ---
   useEffect(() => {
     if (socket.current) {
-      // 1. Receive Message
-      socket.current.on("msg-recieve", (data) => {
-        // Send 'Delivered' receipt back to sender
+      const handleMessageReceive = (data) => {
         const user = JSON.parse(sessionStorage.getItem("chat-app-user"));
-        socket.current.emit("msg-delivered", { messageId: data.data?._id, from: user._id });
         
+        // Prevent duplicate delivery events for groups
+        if(!data.groupId) {
+             socket.current.emit("msg-delivered", { messageId: data.data?._id, from: user._id });
+        }
+        
+        // 1. Construct Safe Sender
+        const senderObj = (data.sender && data.sender.username) 
+            ? data.sender 
+            : { _id: data.sender || "unknown", username: "..." };
+
+        // 2. CRITICAL FIX: Format message structure to match DB
+        // Incoming 'data.msg' is likely a string. We need { text: string }.
+        const messageContent = {
+            text: typeof data.msg === 'string' ? data.msg : (data.msg?.text || ""),
+            attachment: data.attachment || null
+        };
+
         setArrivalMessage({ 
           fromSelf: false, 
-          message: data.msg, 
+          sender: senderObj,
+          message: messageContent, // <--- Correct format
           messageType: data.messageType,
           attachment: data.attachment,
-          messageStatus: "delivered", // It's delivered to us now
+          messageStatus: "delivered",
           createdAt: new Date()
         });
-      });
+      };
 
-      // 2. Status Updates (Sent -> Delivered)
-      socket.current.on("msg-status-update", ({ messageId, status }) => {
+      const handleStatusUpdate = ({ messageId, status }) => {
         setMessages(prev => prev.map(msg => 
             msg._id === messageId ? { ...msg, messageStatus: status } : msg
         ));
-      });
-      
-      // 3. Read Receipts (Delivered -> Read)
-      socket.current.on("msg-read-recieve", (readerId) => {
-        // Mark all my messages to this user as read
+      };
+
+      const handleReadReceive = (readerId) => {
         setMessages(prev => prev.map(msg => 
             msg.fromSelf ? { ...msg, messageStatus: "read" } : msg
         ));
-      });
+      };
 
-      // 4. User Online Status Change (Real-time header update)
-      socket.current.on("user-status-change", ({ userId, isOnline, lastSeen }) => {
+      const handleUserStatusChange = ({ userId, isOnline, lastSeen }) => {
         if (userId === currentChat._id) {
             setChatUserStatus({ isOnline, lastSeen });
         }
-      });
+      };
+
+      socket.current.on("msg-recieve", handleMessageReceive);
+      socket.current.on("msg-status-update", handleStatusUpdate);
+      socket.current.on("msg-read-recieve", handleReadReceive);
+      socket.current.on("user-status-change", handleUserStatusChange);
+
+      return () => {
+        socket.current.off("msg-recieve", handleMessageReceive);
+        socket.current.off("msg-status-update", handleStatusUpdate);
+        socket.current.off("msg-read-recieve", handleReadReceive);
+        socket.current.off("user-status-change", handleUserStatusChange);
+      };
     }
   }, [currentChat]);
 
-  // --- Append Incoming Message ---
   useEffect(() => {
     arrivalMessage && setMessages((prev) => [...prev, arrivalMessage]);
   }, [arrivalMessage]);
 
-  // --- Auto Scroll ---
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // --- Send Message Handler ---
   const handleSendMsg = async (content, type = "text", attachmentData = null) => {
     const data = await JSON.parse(sessionStorage.getItem("chat-app-user"));
     
-    // Optimistic UI Update (Show message immediately)
     const tempId = uuidv4();
     const newMsg = {
         _id: tempId,
         fromSelf: true,
+        sender: data, 
         message: { text: content, attachment: attachmentData },
         messageType: type,
         messageStatus: "sent",
@@ -134,36 +169,37 @@ export default function ChatContainer({ currentChat, socket }) {
       to: currentChat._id,
       message: content,
       attachment: attachmentData,
-      messageType: type
+      messageType: type,
     };
     
-    socket.current.emit("send-msg", payload);
-    const res = await axios.post(sendMessageRoute, payload);
-    
-    // Update the temp ID with the real DB ID once confirmed
-    if (res.data.data) {
-        setMessages(prev => prev.map(m => m._id === tempId ? { ...m, _id: res.data.data._id } : m));
+    // Include groupId and members list for the server to handle broadcasting
+    if (currentChat.isGroup) {
+        payload.groupId = currentChat._id;
+        // Sending members helps the server know who to notify if it doesn't query DB
+        payload.members = currentChat.members.map(m => m._id || m); 
+    }
+
+    try {
+        socket.current.emit("send-msg", payload);
+        const res = await axios.post(sendMessageRoute, payload);
+        
+        if (res.data.data) {
+            setMessages(prev => prev.map(m => m._id === tempId ? { ...m, _id: res.data.data._id } : m));
+        }
+    } catch (err) {
+        console.error("Error sending message:", err);
     }
   };
 
-  // --- Format Last Seen Date ---
   const formatLastSeen = (dateString) => {
       if(!dateString) return "Offline";
       const date = new Date(dateString);
-      // Check if date is today
-      const today = new Date();
-      const isToday = date.getDate() === today.getDate() && 
-                      date.getMonth() === today.getMonth() && 
-                      date.getFullYear() === today.getFullYear();
-      
       const timeStr = date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-      return `Last seen ${isToday ? 'today' : date.toLocaleDateString()} at ${timeStr}`;
+      return `Last seen ${date.toLocaleDateString()} at ${timeStr}`;
   };
 
-  // --- Filter Messages for Search ---
   const filteredMessages = messages.filter(msg => {
       if(!searchQuery) return true;
-      // Only search text messages
       if(msg.messageType === "text" && msg.message?.text) {
           return msg.message.text.toLowerCase().includes(searchQuery.toLowerCase());
       }
@@ -175,20 +211,34 @@ export default function ChatContainer({ currentChat, socket }) {
       <div className="chat-header">
         <div className="user-details">
           <div className="avatar">
-            <img src={`data:image/svg+xml;base64,${currentChat.avatarImage}`} alt="avatar" />
+             {currentChat.isGroup ? (
+                 <div className="group-avatar-placeholder">{currentChat.username[0]}</div>
+             ) : (
+                <img 
+                  src={currentChat.avatarImage 
+                    ? `data:image/svg+xml;base64,${currentChat.avatarImage}` 
+                    : "https://upload.wikimedia.org/wikipedia/commons/7/7c/Profile_avatar_placeholder_large.png"} 
+                  alt="avatar" 
+                />
+             )}
           </div>
           <div className="username">
             <h3>{currentChat.username}</h3>
-            <span className="status">
-                {chatUserStatus.isOnline ? (
-                    <span className="online-indicator">Online</span>
-                ) : (
-                    formatLastSeen(chatUserStatus.lastSeen)
-                )}
-            </span>
+            {currentChat.isGroup ? (
+                <span className="status">{currentChat.members ? currentChat.members.length : 0} members</span>
+            ) : (
+                <span className="status">
+                    {chatUserStatus.isOnline ? <span className="online-indicator">Online</span> : formatLastSeen(chatUserStatus.lastSeen)}
+                </span>
+            )}
           </div>
         </div>
         <div className="header-actions">
+            {currentChat.isGroup && (
+                <div title="Group Info">
+                    <IoInformationCircleOutline onClick={() => setShowGroupInfo(true)} />
+                </div>
+            )}
             <div className={`search-box ${showSearch ? 'active' : ''}`}>
                 <IoSearch onClick={() => setShowSearch(!showSearch)} />
                 {showSearch && (
@@ -200,7 +250,7 @@ export default function ChatContainer({ currentChat, socket }) {
                     />
                 )}
             </div>
-            <div onClick={toggleTheme} className="theme-toggle" title="Toggle Theme">
+            <div onClick={toggleTheme} className="theme-toggle">
                 {theme === 'dark' ? <IoSunny /> : <IoMoon />}
             </div>
             <Logout />
@@ -212,30 +262,26 @@ export default function ChatContainer({ currentChat, socket }) {
           return (
             <div ref={scrollRef} key={message._id || uuidv4()} className={`message-wrapper ${message.fromSelf ? "sended" : "recieved"}`}>
               <div className="message-content">
+                {!message.fromSelf && currentChat.isGroup && message.sender && (
+                    <span className="sender-name">{message.sender.username || "Unknown"}</span>
+                )}
+                
                 <div className="bubble">
-                    {/* Render Attachment or Text */}
                     {message.messageType === "attachment" ? (
                        <div className="attachment">
-                          {message.message.attachment.mimeType.startsWith('image') ? (
+                          {message.message?.attachment?.mimeType?.startsWith('image') ? (
                              <img src={message.message.attachment.url} alt="file" />
-                          ) : message.message.attachment.mimeType.startsWith('video') ? (
-                             <video src={message.message.attachment.url} controls />
                           ) : (
-                             <a href={message.message.attachment.url} download target="_blank" rel="noreferrer" className="file-download">
-                                📄 {message.message.attachment.fileName || "Download File"}
-                             </a>
+                             <a href={message.message?.attachment?.url || "#"} download>Download File</a>
                           )}
-                          {/* Caption if provided (optional extension) */}
-                          {message.message.text && <p className="caption">{message.message.text}</p>}
                        </div>
                     ) : (
-                        <p>{message.message.text}</p>
+                        <p>{message.message?.text || ""}</p>
                     )}
                     
-                    {/* Metadata: Time and Status Ticks */}
                     <div className="meta">
                         <span className="time">
-                            {new Date(message.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                            {message.createdAt ? new Date(message.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : ""}
                         </span>
                         {message.fromSelf && (
                             <div className="ticks">
@@ -251,7 +297,15 @@ export default function ChatContainer({ currentChat, socket }) {
           );
         })}
       </div>
+      
       <ChatInput handleSendMsg={handleSendMsg} />
+
+      {showGroupInfo && (
+        <GroupInfo 
+            currentChat={currentChat} 
+            closePanel={() => setShowGroupInfo(false)} 
+        />
+      )}
     </Container>
   );
 }
@@ -261,7 +315,8 @@ const Container = styled.div`
   grid-template-rows: 10% 80% 10%;
   gap: 0.1rem;
   overflow: hidden;
-  background-color: var(--bg-color); /* Uses CSS Variable from index.css */
+  background-color: var(--bg-color);
+  position: relative; 
   
   .chat-header {
     display: flex; justify-content: space-between; align-items: center; padding: 0 2rem;
@@ -271,6 +326,7 @@ const Container = styled.div`
     .user-details {
       display: flex; align-items: center; gap: 1rem;
       .avatar img { height: 3rem; }
+      .group-avatar-placeholder { height: 3rem; width: 3rem; background: #9a86f3; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; }
       .username {
           display: flex; flex-direction: column;
           h3 { color: var(--text-color); margin: 0; font-size: 1.1rem; }
@@ -281,17 +337,13 @@ const Container = styled.div`
 
     .header-actions {
         display: flex; align-items: center; gap: 1.5rem; color: var(--text-color);
-        
-        .theme-toggle { cursor: pointer; display: flex; align-items: center; svg { font-size: 1.3rem; } }
-        
+        div { cursor: pointer; display: flex; align-items: center; }
+        svg { font-size: 1.3rem; }
         .search-box {
             display: flex; align-items: center; gap: 10px;
             background: transparent; padding: 5px; border-radius: 20px; transition: 0.3s;
             &.active { background: var(--input-bg); padding: 5px 15px; }
-            svg { font-size: 1.3rem; cursor: pointer; }
-            input { 
-                background: transparent; border: none; color: var(--text-color); outline: none; width: 150px; 
-            }
+            input { background: transparent; border: none; color: var(--text-color); outline: none; width: 150px; }
         }
     }
   }
@@ -299,48 +351,36 @@ const Container = styled.div`
   .chat-messages {
     padding: 1rem 2rem; display: flex; flex-direction: column; gap: 1rem; overflow: auto;
     background-color: var(--chat-bg);
-    background-image: url("https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png"); /* Optional generic pattern */
+    background-image: url("https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png"); 
     background-blend-mode: overlay;
     
     .message-wrapper {
       display: flex;
       .message-content {
         max-width: 60%;
+        display: flex; flex-direction: column; 
+        
+        .sender-name {
+            font-size: 0.75rem; color: #ffa0a0; margin-left: 10px; margin-bottom: 2px; font-weight: bold;
+        }
+
         .bubble {
             padding: 0.5rem 1rem; border-radius: 8px; color: var(--text-color);
             position: relative; box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-            
             p { margin: 0; word-wrap: break-word; line-height: 1.4; font-size: 0.95rem; }
-            
             .attachment {
                 img, video { max-width: 100%; border-radius: 6px; margin-bottom: 5px; display: block; }
-                .file-download { 
-                    display: flex; align-items: center; gap: 5px; text-decoration: none; 
-                    color: var(--text-color); background: rgba(0,0,0,0.1); padding: 10px; border-radius: 5px; 
-                }
+                a { color: var(--text-color); text-decoration: none; display: flex; align-items: center; gap: 5px; background: rgba(0,0,0,0.1); padding: 5px; border-radius: 5px;}
             }
-            
             .meta { 
                 display: flex; justify-content: flex-end; align-items: center; gap: 0.3rem; margin-top: 4px; 
-                .time { font-size: 0.65rem; color: #999; margin-top: 2px; }
-                .ticks { 
-                    font-size: 1rem; display: flex;
-                    svg { color: #999; }
-                    .delivered { color: #999; } /* Double tick grey */
-                    .read { color: #53bdeb; }   /* Double tick blue */
-                }
+                .time { font-size: 0.65rem; color: #999; }
+                .ticks { font-size: 1rem; display: flex; svg { color: #999; } .read { color: #53bdeb; } }
             }
         }
       }
     }
-    
-    .sended { 
-        justify-content: flex-end; 
-        .bubble { background-color: var(--msg-sent); border-top-right-radius: 0; } 
-    }
-    .recieved { 
-        justify-content: flex-start; 
-        .bubble { background-color: var(--msg-recieved); border-top-left-radius: 0; } 
-    }
+    .sended { justify-content: flex-end; .bubble { background-color: var(--msg-sent); border-top-right-radius: 0; } }
+    .recieved { justify-content: flex-start; .bubble { background-color: var(--msg-recieved); border-top-left-radius: 0; } }
   }
 `;
