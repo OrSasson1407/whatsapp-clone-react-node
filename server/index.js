@@ -2,27 +2,32 @@ const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
 const socket = require("socket.io");
-const User = require("./models/userModel"); // Required for online status updates
+const path = require("path");
+const User = require("./models/userModel");
+const Messages = require("./models/messageModel"); // Required for status updates
 require("dotenv").config();
 
 // --- Import Routes ---
 const authRoutes = require("./routes/authRoutes");
 const messageRoutes = require("./routes/msgRoutes"); 
-const groupRoutes = require("./routes/groupRoutes"); // Added for Idea 3
+const groupRoutes = require("./routes/groupRoutes");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
 // --- Middleware Setup ---
 app.use(cors());
-// Increased limits to fix "Payload Too Large" errors when sending images/videos
-app.use(express.json({ limit: "50mb" }));
-app.use(express.urlencoded({ limit: "50mb", extended: true }));
+app.use(express.json({ limit: "5mb" })); // Limit payload to prevent DoS
+app.use(express.urlencoded({ limit: "5mb", extended: true }));
+
+// --- Serve Uploaded Files ---
+// This allows the frontend to access uploaded media via http://localhost:5000/uploads/filename
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // --- Routes Configuration ---
 app.use("/api/auth", authRoutes);
 app.use("/api/messages", messageRoutes); 
-app.use("/api/groups", groupRoutes); // Added for Idea 3
+app.use("/api/groups", groupRoutes);
 
 // --- Database Connection ---
 mongoose
@@ -42,29 +47,29 @@ const server = app.listen(PORT, () => {
 // --- Socket.io Setup ---
 const io = socket(server, {
   cors: {
-    origin: "http://localhost:5173",
+    origin: "http://localhost:5173", // Replace with your frontend URL in production
     credentials: true,
   },
-  // Increased buffer size for large file uploads via socket
-  maxHttpBufferSize: 1e8 
+  // 5MB limit for socket payloads (we use HTTP for larger files now)
+  maxHttpBufferSize: 5e6 
 });
 
 global.onlineUsers = new Map();
 
 io.on("connection", (socket) => {
-  global.chatSocket = socket;
   
   // Event: User joins/comes online
   socket.on("add-user", async (userId) => {
     onlineUsers.set(userId, socket.id);
     // Update persistent online status in DB
     await User.findByIdAndUpdate(userId, { isOnline: true });
+    // Broadcast to others that this user is online
     socket.broadcast.emit("user-status-change", { userId, isOnline: true });
   });
 
-  // Event: Send Message (Handles Text, Audio, Attachments, Replies, Link Metadata)
+  // Event: Send Message (Handles Text, Attachments, Replies)
   socket.on("send-msg", (data) => {
-    // data structure: { to, from, msg, messageType, groupId, replyTo, linkMetadata, ... }
+    // data: { to, from, msg, messageType, groupId, replyTo, linkMetadata, attachment }
     
     // 1. Group Message
     if (data.groupId) {
@@ -74,7 +79,8 @@ io.on("connection", (socket) => {
         sender: data.from,
         groupId: data.groupId,
         replyTo: data.replyTo,
-        linkMetadata: data.linkMetadata
+        linkMetadata: data.linkMetadata,
+        attachment: data.attachment
       });
     } 
     // 2. Direct (1-on-1) Message
@@ -86,16 +92,54 @@ io.on("connection", (socket) => {
           messageType: data.messageType || "text",
           from: data.from,
           replyTo: data.replyTo,
-          linkMetadata: data.linkMetadata
+          linkMetadata: data.linkMetadata,
+          attachment: data.attachment,
+          messageStatus: "sent" 
         });
       }
+    }
+  });
+
+  // --- NEW: Advanced Status (Delivered) ---
+  // Triggered when the recipient receives the message via socket
+  socket.on("msg-delivered", async (data) => {
+    // data: { messageId, from } -> 'from' is the original SENDER id
+    
+    if(data.messageId) {
+       await Messages.findByIdAndUpdate(data.messageId, { messageStatus: "delivered" });
+    }
+
+    // Notify the original sender that their message was delivered
+    const senderSocket = onlineUsers.get(data.from);
+    if (senderSocket) {
+      socket.to(senderSocket).emit("msg-status-update", { 
+        messageId: data.messageId, 
+        status: "delivered" 
+      });
+    }
+  });
+
+  // --- NEW: Advanced Status (Read) ---
+  // Triggered when the recipient opens the chat
+  socket.on("msg-read", async (data) => {
+    // data: { to, from } -> 'to' is the user whose messages were just read
+    
+    // Mark all unread messages from that user as read in DB
+    await Messages.updateMany(
+      { sender: data.to, users: { $all: [data.from, data.to] }, messageStatus: { $ne: "read" } },
+      { messageStatus: "read" }
+    );
+    
+    // Notify the other user (if online)
+    const senderSocket = onlineUsers.get(data.to); 
+    if (senderSocket) {
+        socket.to(senderSocket).emit("msg-read-recieve", data.from); 
     }
   });
 
   // Event: Join Group Room
   socket.on("join-group", (groupId) => {
     socket.join(groupId);
-    console.log(`User joined group room: ${groupId}`);
   });
 
   // Event: Typing Indicators
@@ -133,9 +177,8 @@ io.on("connection", (socket) => {
     }
   });
 
-  // Event: Send Reaction (Emoji)
+  // Event: Send Reaction
   socket.on("send-reaction", (data) => {
-    // data: { to, messageId, from, emoji, groupId }
     if (data.groupId) {
          socket.to(data.groupId).emit("reaction-recieve", { 
             messageId: data.messageId, 
@@ -154,16 +197,7 @@ io.on("connection", (socket) => {
     }
   });
 
-  // Event: Read Receipts
-  socket.on("msg-read", (data) => {
-    // Usually only relevant for 1-on-1, but could be adapted for groups
-    const sendUserSocket = onlineUsers.get(data.to);
-    if (sendUserSocket) {
-      socket.to(sendUserSocket).emit("msg-read-recieve", data.from);
-    }
-  });
-
-  // Event: Disconnect logic with DB sync
+  // Event: Disconnect logic
   socket.on("disconnect", async () => {
     let disconnectedUserId;
     for (let [userId, socketId] of onlineUsers.entries()) {
@@ -174,8 +208,15 @@ io.on("connection", (socket) => {
       }
     }
     if (disconnectedUserId) {
-      await User.findByIdAndUpdate(disconnectedUserId, { isOnline: false });
-      socket.broadcast.emit("user-status-change", { userId: disconnectedUserId, isOnline: false });
+      // Update Last Seen time
+      const lastSeen = new Date();
+      await User.findByIdAndUpdate(disconnectedUserId, { isOnline: false, lastSeen: lastSeen });
+      
+      socket.broadcast.emit("user-status-change", { 
+        userId: disconnectedUserId, 
+        isOnline: false,
+        lastSeen: lastSeen 
+      });
     }
     console.log("User disconnected:", socket.id);
   });

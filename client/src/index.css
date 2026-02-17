@@ -1,11 +1,4 @@
-/* איפוס הגדרות דפדפן */
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
-
-/* הגדרת פונט ורקע */
+/* Global Reset & Font */
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
@@ -13,27 +6,56 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #131324; /* צבע הרקע הכהה של האפליקציה */
-  overflow: hidden; /* מונע גלילה של כל העמוד, רק הצ'אט ייגלל */
+  overflow: hidden; /* Prevents double scrollbars */
 }
 
-/* עיצוב פס הגלילה (Scrollbar) שיהיה דק ויפה */
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+/* --- THEME VARIABLES --- */
+
+/* Dark Mode (Default) - Deep Blues/Purples */
+#dark {
+  --bg-color: #131324;
+  --chat-bg: #00000076;
+  --header-bg: #ffffff05;
+  --input-bg: #ffffff10;
+  --text-color: white;
+  
+  /* Message Bubbles */
+  --msg-sent: #4f04ff21;
+  --msg-recieved: #ffffff10;
+  
+  /* Accents */
+  --accent-color: #9a86f3;
+  --scroll-thumb: #ffffff39;
+}
+
+/* Light Mode - White/Gray/Green (WhatsApp-like) */
+#light {
+  --bg-color: #d1d7db;       /* Background behind the chat window */
+  --chat-bg: #efeae2;        /* Chat area background */
+  --header-bg: #f0f2f5;      /* Top bar background */
+  --input-bg: #ffffff;       /* Input field background */
+  --text-color: #111b21;     /* Main text color */
+  
+  /* Message Bubbles */
+  --msg-sent: #d9fdd3;       /* Light Green for sent */
+  --msg-recieved: #ffffff;   /* White for received */
+  
+  /* Accents */
+  --accent-color: #00a884;
+  --scroll-thumb: #ced0d1;
+}
+
+/* Scrollbar Styling */
 ::-webkit-scrollbar {
-  width: 0.5rem;
-  height: 0.5rem;
+  width: 0.2rem;
 }
-
-::-webkit-scrollbar-track {
-  background: transparent; 
-}
-
 ::-webkit-scrollbar-thumb {
-  background-color: #9a86f3; /* הצבע הסגול שלנו */
-  border-radius: 0.5rem;
-}
-
-/* התאמת גודל הקונטיינר הראשי */
-#root {
-  height: 100vh;
-  width: 100vw;
+  background-color: var(--scroll-thumb);
+  width: 0.1rem;
+  border-radius: 1rem;
 }

@@ -1,6 +1,6 @@
 const User = require("../models/userModel");
 const bcrypt = require("bcrypt");
-const axios = require("axios"); // Ensure you have installed axios: npm install axios
+const axios = require("axios"); 
 
 module.exports.login = async (req, res, next) => {
   try {
@@ -47,14 +47,17 @@ module.exports.register = async (req, res, next) => {
 
 module.exports.getAllUsers = async (req, res, next) => {
   try {
-    const users = await User.find({ _id: { $ne: req.params.id } }).select([
-      "email",
-      "username",
-      "avatarImage",
-      "_id",
-      "about",
-      "isOnline",
-    ]);
+    // FIXED: Added .limit(50) so the app doesn't crash when user count gets large.
+    const users = await User.find({ _id: { $ne: req.params.id } })
+      .select([
+        "email",
+        "username",
+        "avatarImage",
+        "_id",
+        "about",
+        "isOnline",
+      ])
+      .limit(50);
     return res.json(users);
   } catch (ex) {
     next(ex);
@@ -91,8 +94,6 @@ module.exports.logOut = (req, res, next) => {
   }
 };
 
-// --- Organization Controllers ---
-
 const toggleList = async (req, res, field, next) => {
     try {
         const { userId, targetId } = req.body;
@@ -119,15 +120,10 @@ module.exports.togglePin = (req, res, next) => toggleList(req, res, 'pinnedChats
 module.exports.toggleArchive = (req, res, next) => toggleList(req, res, 'archivedChats', next);
 module.exports.toggleMute = (req, res, next) => toggleList(req, res, 'mutedChats', next);
 
-// --- UPDATED: Avatar Proxy using DiceBear ---
-// This uses a different API that is free and has much higher rate limits.
 module.exports.getRandomAvatar = async (req, res, next) => {
   try {
     const key = req.params.key;
-    // We switched from api.multiavatar.com to api.dicebear.com
     const response = await axios.get(`https://api.dicebear.com/9.x/avataaars/svg?seed=${key}`);
-    
-    // DiceBear returns the SVG directly
     return res.send(response.data);
   } catch (ex) {
     next(ex);

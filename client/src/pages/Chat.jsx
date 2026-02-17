@@ -31,14 +31,19 @@ export default function Chat() {
     checkUser();
   }, []);
 
-  // Effect 2: Connect to Socket.io when user is loaded
+  // Effect 2: Connect to Socket.io when user is loaded (FIXED MEMORY LEAK)
   useEffect(() => {
     if (currentUser) {
-      // Connect to the socket server
       socket.current = io(host);
-      // Emit the "add-user" event to the server so it knows we are online
       socket.current.emit("add-user", currentUser._id);
     }
+
+    // Cleanup function to prevent duplicate socket connections
+    return () => {
+      if (socket.current) {
+        socket.current.disconnect();
+      }
+    };
   }, [currentUser]);
 
   // Effect 3: Fetch contacts (all other users)
@@ -49,8 +54,6 @@ export default function Chat() {
           const data = await axios.get(`${allUsersRoute}/${currentUser._id}`);
           setContacts(data.data);
         } else {
-          // If user hasn't set an avatar, we might redirect them to set one
-          // For now, we will just redirect to setAvatar page (optional logic)
           navigate("/setAvatar"); 
         }
       }
@@ -58,7 +61,6 @@ export default function Chat() {
     fetchContacts();
   }, [currentUser]);
 
-  // Function to handle chat change (when clicking a contact)
   const handleChatChange = (chat) => {
     setCurrentChat(chat);
   };
@@ -67,13 +69,11 @@ export default function Chat() {
     <>
       <Container>
         <div className="container">
-          {/* Sidebar: List of Contacts */}
           <Contacts 
             contacts={contacts} 
             changeChat={handleChatChange} 
           />
           
-          {/* Main Area: Show Welcome screen OR Chat Window */}
           {currentChat === undefined ? (
             <Welcome />
           ) : (
@@ -88,7 +88,6 @@ export default function Chat() {
   );
 }
 
-// Styled Components
 const Container = styled.div`
   height: 100vh;
   width: 100vw;

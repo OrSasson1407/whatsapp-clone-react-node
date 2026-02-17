@@ -36,8 +36,12 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
-  // --- NEW: Organization Fields ---
-  // Storing IDs of users/groups
+  // --- NEW: Last Seen Timestamp ---
+  lastSeen: {
+    type: Date,
+    default: Date.now
+  },
+  // --- Organization Fields ---
   pinnedChats: { 
     type: [String], 
     default: [] 
@@ -47,7 +51,7 @@ const userSchema = new mongoose.Schema({
     default: [] 
   },
   mutedChats: { 
-    type: [String], // List of IDs that are muted
+    type: [String], 
     default: [] 
   }
 });

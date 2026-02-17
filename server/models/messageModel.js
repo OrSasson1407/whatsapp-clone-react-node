@@ -5,9 +5,9 @@ const MessageSchema = mongoose.Schema(
     message: {
       text: { type: String, required: false },
       audioUrl: { type: String, required: false },
-      // New: Generic attachment support (Images, Videos, PDFs)
+      // Generic attachment support (Images, Videos, PDFs)
       attachment: {
-        url: { type: String }, // Base64 or URL
+        url: { type: String }, 
         mimeType: { type: String }, // e.g., 'image/png', 'video/mp4'
         fileName: { type: String },
       },
@@ -18,20 +18,26 @@ const MessageSchema = mongoose.Schema(
       ref: "User",
       required: true,
     },
-    // New: Reference for threading/replies
+    // --- NEW: Advanced Message Status ---
+    messageStatus: {
+      type: String,
+      enum: ["sent", "delivered", "read"],
+      default: "sent"
+    },
+    // Reference for threading/replies
     replyTo: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Messages", 
       default: null
     },
-    // New: Reactions array
+    // Reactions array
     reactions: [
       {
         user: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
         emoji: { type: String },
       }
     ],
-    // New: Link Preview Metadata
+    // Link Preview Metadata
     linkMetadata: {
       title: String,
       description: String,
@@ -44,5 +50,9 @@ const MessageSchema = mongoose.Schema(
     timestamps: true,
   }
 );
+
+// --- NEW: Text Index for Search Functionality ---
+// This allows you to search for strings inside the 'message.text' field
+MessageSchema.index({ "message.text": "text" });
 
 module.exports = mongoose.model("Messages", MessageSchema);
