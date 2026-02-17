@@ -5,23 +5,24 @@ const socket = require("socket.io");
 const User = require("./models/userModel"); // Required for online status updates
 require("dotenv").config();
 
-// Import Routes
+// --- Import Routes ---
 const authRoutes = require("./routes/authRoutes");
 const messageRoutes = require("./routes/msgRoutes"); 
+const groupRoutes = require("./routes/groupRoutes"); // Added for Idea 3
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
 // --- Middleware Setup ---
 app.use(cors());
-
-// FIX: Increase the payload limit to 50mb (or higher) to handle images/videos
+// Increased limits to fix "Payload Too Large" errors when sending images/videos
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
 // --- Routes Configuration ---
 app.use("/api/auth", authRoutes);
 app.use("/api/messages", messageRoutes); 
+app.use("/api/groups", groupRoutes); // Added for Idea 3
 
 // --- Database Connection ---
 mongoose
@@ -44,7 +45,7 @@ const io = socket(server, {
     origin: "http://localhost:5173",
     credentials: true,
   },
-  // FIX: Increase socket message buffer size to 100MB to allow large uploads via socket
+  // Increased buffer size for large file uploads via socket
   maxHttpBufferSize: 1e8 
 });
 
@@ -61,9 +62,11 @@ io.on("connection", (socket) => {
     socket.broadcast.emit("user-status-change", { userId, isOnline: true });
   });
 
-  // Event: Send Message (Merged to support Text, Audio, and Groups)
+  // Event: Send Message (Handles Text, Audio, Attachments, Replies, Link Metadata)
   socket.on("send-msg", (data) => {
-    // If it's a group message, broadcast to the room
+    // data structure: { to, from, msg, messageType, groupId, replyTo, linkMetadata, ... }
+    
+    // 1. Group Message
     if (data.groupId) {
       socket.to(data.groupId).emit("msg-recieve", {
         msg: data.msg,
@@ -73,8 +76,9 @@ io.on("connection", (socket) => {
         replyTo: data.replyTo,
         linkMetadata: data.linkMetadata
       });
-    } else {
-      // 1-on-1 private message
+    } 
+    // 2. Direct (1-on-1) Message
+    else {
       const sendUserSocket = onlineUsers.get(data.to);
       if (sendUserSocket) {
         socket.to(sendUserSocket).emit("msg-recieve", {
@@ -88,28 +92,36 @@ io.on("connection", (socket) => {
     }
   });
 
-  // --- FEATURE: Group Chat Rooms ---
+  // Event: Join Group Room
   socket.on("join-group", (groupId) => {
     socket.join(groupId);
-    console.log(`User joined group: ${groupId}`);
+    console.log(`User joined group room: ${groupId}`);
   });
 
-  // --- FEATURE: Typing Indicators ---
+  // Event: Typing Indicators
   socket.on("typing", (data) => {
-    const sendUserSocket = onlineUsers.get(data.to);
-    if (sendUserSocket) {
-      socket.to(sendUserSocket).emit("typing-recieve", data.from);
+    if (data.groupId) {
+        socket.to(data.groupId).emit("typing-recieve", { from: data.from, groupId: data.groupId });
+    } else {
+        const sendUserSocket = onlineUsers.get(data.to);
+        if (sendUserSocket) {
+          socket.to(sendUserSocket).emit("typing-recieve", data.from);
+        }
     }
   });
 
   socket.on("stop-typing", (data) => {
-    const sendUserSocket = onlineUsers.get(data.to);
-    if (sendUserSocket) {
-      socket.to(sendUserSocket).emit("stop-typing-recieve", data.from);
+    if (data.groupId) {
+        socket.to(data.groupId).emit("stop-typing-recieve", { from: data.from, groupId: data.groupId });
+    } else {
+        const sendUserSocket = onlineUsers.get(data.to);
+        if (sendUserSocket) {
+          socket.to(sendUserSocket).emit("stop-typing-recieve", data.from);
+        }
     }
   });
 
-  // --- FEATURE: Message Deletion (Delete for Everyone) ---
+  // Event: Message Deletion
   socket.on("delete-msg", (data) => {
     if (data.groupId) {
       socket.to(data.groupId).emit("msg-delete-recieve", data.messageId);
@@ -120,22 +132,31 @@ io.on("connection", (socket) => {
       }
     }
   });
-  
-  // --- FEATURE: Reactions ---
+
+  // Event: Send Reaction (Emoji)
   socket.on("send-reaction", (data) => {
-    // data: { to, messageId, from, emoji }
-    const sendUserSocket = onlineUsers.get(data.to);
-    if (sendUserSocket) {
-        socket.to(sendUserSocket).emit("reaction-recieve", { 
+    // data: { to, messageId, from, emoji, groupId }
+    if (data.groupId) {
+         socket.to(data.groupId).emit("reaction-recieve", { 
             messageId: data.messageId, 
             from: data.from, 
             emoji: data.emoji 
         });
+    } else {
+        const sendUserSocket = onlineUsers.get(data.to);
+        if (sendUserSocket) {
+            socket.to(sendUserSocket).emit("reaction-recieve", { 
+                messageId: data.messageId, 
+                from: data.from, 
+                emoji: data.emoji 
+            });
+        }
     }
   });
 
-  // --- FEATURE: Read Receipts ---
+  // Event: Read Receipts
   socket.on("msg-read", (data) => {
+    // Usually only relevant for 1-on-1, but could be adapted for groups
     const sendUserSocket = onlineUsers.get(data.to);
     if (sendUserSocket) {
       socket.to(sendUserSocket).emit("msg-read-recieve", data.from);

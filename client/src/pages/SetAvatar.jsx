@@ -5,20 +5,17 @@ import { Buffer } from "buffer";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import { useNavigate } from "react-router-dom";
-import { setAvatarRoute } from "../utils/APIRoutes";
-
-// אנימציית טעינה
-const loader = "https://media.giphy.com/media/3oEjI6SIIHBdRxXI40/giphy.gif";
+// Import the proxy route
+import { setAvatarRoute, randomAvatarRoute } from "../utils/APIRoutes";
 
 export default function SetAvatar() {
-  // שינינו את ה-API ל-DiceBear שהוא יציב יותר וללא בעיות CORS
-  const api = `https://api.dicebear.com/9.x/avataaars/svg?seed=`;
-  
+  // Use the proxy route instead of the external URL
+  const api = randomAvatarRoute; 
   const navigate = useNavigate();
   const [avatars, setAvatars] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedAvatar, setSelectedAvatar] = useState(undefined);
-
+  
   const toastOptions = {
     position: "bottom-right",
     autoClose: 8000,
@@ -28,18 +25,20 @@ export default function SetAvatar() {
   };
 
   useEffect(() => {
-    if (!sessionStorage.getItem("chat-app-user"))
-      navigate("/login");
-  }, []);
+    async function checkAuth() {
+        if (!sessionStorage.getItem("chat-app-user")) {
+            navigate("/login");
+        }
+    }
+    checkAuth();
+  }, [navigate]);
 
   const setProfilePicture = async () => {
     if (selectedAvatar === undefined) {
       toast.error("Please select an avatar", toastOptions);
     } else {
-      const user = await JSON.parse(
-        sessionStorage.getItem("chat-app-user")
-      );
-
+      const user = await JSON.parse(sessionStorage.getItem("chat-app-user"));
+      
       const { data } = await axios.post(`${setAvatarRoute}/${user._id}`, {
         image: avatars[selectedAvatar],
       });
@@ -47,10 +46,7 @@ export default function SetAvatar() {
       if (data.isSet) {
         user.isAvatarImageSet = true;
         user.avatarImage = data.image;
-        sessionStorage.setItem(
-          "chat-app-user",
-          JSON.stringify(user)
-        );
+        sessionStorage.setItem("chat-app-user", JSON.stringify(user));
         navigate("/");
       } else {
         toast.error("Error setting avatar. Please try again.", toastOptions);
@@ -61,19 +57,16 @@ export default function SetAvatar() {
   useEffect(() => {
     async function fetchData() {
       const data = [];
-      // ניסיון לטעון 4 תמונות
+      // Fetch 4 random avatars
       for (let i = 0; i < 4; i++) {
         try {
-            // יצירת מספר רנדומלי כדי לקבל דמות שונה
-            const randomId = Math.round(Math.random() * 1000);
-            
-            // DiceBear API Call
-            const image = await axios.get(`${api}${randomId}`);
-            
+            // Updated to use the proxy route
+            // The server will fetch from api.multiavatar.com and return the data
+            const image = await axios.get(`${api}/${Math.round(Math.random() * 1000)}`);
             const buffer = new Buffer(image.data);
             data.push(buffer.toString("base64"));
-        } catch (error) {
-            console.log("Error fetching avatar image", error);
+        } catch (e) {
+            console.error("Error fetching avatar", e);
         }
       }
       setAvatars(data);
@@ -86,7 +79,8 @@ export default function SetAvatar() {
     <>
       {isLoading ? (
         <Container>
-          <img src={loader} alt="loader" className="loader" />
+          <div className="loader"></div>
+          <h1>Loading Avatars...</h1>
         </Container>
       ) : (
         <Container>
@@ -98,14 +92,11 @@ export default function SetAvatar() {
               return (
                 <div
                   key={index}
-                  className={`avatar ${
-                    selectedAvatar === index ? "selected" : ""
-                  }`}
+                  className={`avatar ${selectedAvatar === index ? "selected" : ""}`}
                 >
                   <img
                     src={`data:image/svg+xml;base64,${avatar}`}
                     alt="avatar"
-                    key={avatar}
                     onClick={() => setSelectedAvatar(index)}
                   />
                 </div>
@@ -115,9 +106,9 @@ export default function SetAvatar() {
           <button onClick={setProfilePicture} className="submit-btn">
             Set as Profile Picture
           </button>
-          <ToastContainer />
         </Container>
       )}
+      <ToastContainer />
     </>
   );
 }
@@ -133,35 +124,62 @@ const Container = styled.div`
   width: 100vw;
 
   .loader {
-    max-inline-size: 100%;
+    width: 60px; 
+    height: 60px; 
+    border: 5px solid #4e0eff; 
+    border-bottom-color: transparent;
+    border-radius: 50%; 
+    animation: rotation 1s linear infinite;
+  }
+  
+  @keyframes rotation { 
+    0% { transform: rotate(0deg); } 
+    100% { transform: rotate(360deg); } 
   }
 
   .title-container {
-    h1 {
-      color: white;
+    h1 { 
+        color: white; 
+        text-align: center; 
+        font-weight: 600;
+        letter-spacing: 1px;
     }
   }
-  .avatars {
-    display: flex;
-    gap: 2rem;
 
+  .avatars {
+    display: flex; 
+    gap: 2rem;
+    
     .avatar {
       border: 0.4rem solid transparent;
       padding: 0.4rem;
-      border-radius: 5rem;
+      border-radius: 50%;
       display: flex;
       justify-content: center;
       align-items: center;
-      transition: 0.5s ease-in-out;
-      img {
-        height: 6rem;
-        transition: 0.5s ease-in-out;
+      transition: all 0.4s ease-in-out;
+      cursor: pointer;
+      
+      img { 
+        height: 6rem; 
+        transition: 0.4s ease-in-out; 
+      }
+      
+      &:hover { 
+        border-color: #997af0; 
+        transform: scale(1.1); 
+        box-shadow: 0 0 15px #997af080;
       }
     }
+    
     .selected {
-      border: 0.4rem solid #4e0eff;
+      border-color: #4e0eff;
+      transform: scale(1.1);
+      box-shadow: 0 0 20px #4e0eff80;
+      background-color: #4e0eff20;
     }
   }
+
   .submit-btn {
     background-color: #4e0eff;
     color: white;
@@ -172,8 +190,13 @@ const Container = styled.div`
     border-radius: 0.4rem;
     font-size: 1rem;
     text-transform: uppercase;
-    &:hover {
-      background-color: #4e0eff;
+    letter-spacing: 1px;
+    transition: 0.3s ease-in-out;
+    
+    &:hover { 
+        background-color: #997af0; 
+        box-shadow: 0 0 20px #4e0eff60; 
+        transform: translateY(-2px);
     }
   }
 `;

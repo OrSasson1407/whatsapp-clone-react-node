@@ -1,16 +1,30 @@
 const {
-  register,
   login,
-  setAvatar,
+  register,
   getAllUsers,
+  setAvatar,
+  logOut,
+  togglePin,
+  toggleArchive,
+  toggleMute,
+  getRandomAvatar
 } = require("../controllers/userController");
 
 const router = require("express").Router();
 
-// Define the routes
-router.post("/register", register);
+// Auth Routes
 router.post("/login", login);
-router.post("/setavatar/:id", setAvatar); // :id is a dynamic parameter
-router.get("/allusers/:id", getAllUsers); // We pass the current user ID to exclude it
+router.post("/register", register);
+router.get("/allusers/:id", getAllUsers);
+router.post("/setavatar/:id", setAvatar);
+router.get("/logout/:id", logOut);
+
+// Organization Routes
+router.post("/pin", togglePin);
+router.post("/archive", toggleArchive);
+router.post("/mute", toggleMute);
+
+// Avatar Proxy Route
+router.get("/avatar/:key", getRandomAvatar);
 
 module.exports = router;

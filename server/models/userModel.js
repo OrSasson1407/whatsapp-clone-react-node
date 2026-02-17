@@ -27,16 +27,29 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: "",
   },
-  // --- UPGRADE FIELDS ---
   about: {
     type: String,
-    default: "Hey there! I am using Snappy.", // Professional status message
+    default: "Hey there! I am using Snappy.",
     max: 50,
   },
   isOnline: {
     type: Boolean,
-    default: false, // Tracks active socket connections in the DB
+    default: false,
   },
+  // --- NEW: Organization Fields ---
+  // Storing IDs of users/groups
+  pinnedChats: { 
+    type: [String], 
+    default: [] 
+  }, 
+  archivedChats: { 
+    type: [String], 
+    default: [] 
+  },
+  mutedChats: { 
+    type: [String], // List of IDs that are muted
+    default: [] 
+  }
 });
 
 module.exports = mongoose.model("Users", userSchema);
